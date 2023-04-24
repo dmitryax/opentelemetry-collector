@@ -25,7 +25,8 @@ It is possible that a core approver isn't a contrib approver. In that case, the 
 
 ## Releasing opentelemetry-collector
 
-1. Determine the version number that will be assigned to the release. During the beta phase, we increment the minor version number and set the patch number to 0. In this document, we are using `v0.55.0` as the version to be released, following `v0.54.0`.
+1. Determine the version number that will be assigned to the release. During the beta phase, we increment the minor version number and set the patch number to 0. In this document, we are using `v0.55.0` as the version to be released, following `v0.54.0`. 
+   Check if stable modules have any changes since the last release by reunning `make check-changes PREVIOUS_VERSION=v1.0.0-rc9 MODSET=stable`. If there are no changes, there is no need to release new version for stable modules. 
 
 2. Run the action [Automation - Prepare Release](https://github.com/open-telemetry/opentelemetry-collector/actions/workflows/prepare-release.yml). This will create an issue to track the progress of the release and a pull request to update the changelog and version numbers in the repo.
 

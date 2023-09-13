@@ -34,7 +34,7 @@ func NewDefaultTimeoutSettings() TimeoutSettings {
 type requestSender interface {
 	start(ctx context.Context, host component.Host, set exporter.CreateSettings) error
 	shutdown()
-	send(req internal.Request) error
+	send(req *internal.Request) error
 	setNextSender(nextSender requestSender)
 }
 
@@ -50,7 +50,7 @@ func (b *baseRequestSender) start(context.Context, component.Host, exporter.Crea
 
 func (b *baseRequestSender) shutdown() {}
 
-func (b *baseRequestSender) send(req internal.Request) error {
+func (b *baseRequestSender) send(req *internal.Request) error {
 	return b.nextSender.send(req)
 }
 
@@ -59,30 +59,6 @@ func (b *baseRequestSender) setNextSender(nextSender requestSender) {
 }
 
 type obsrepSenderFactory func(obsrep *obsExporter) requestSender
-
-// baseRequest is a base implementation for the internal.Request.
-type baseRequest struct {
-	ctx                        context.Context
-	processingFinishedCallback func()
-}
-
-func (req *baseRequest) Context() context.Context {
-	return req.ctx
-}
-
-func (req *baseRequest) SetContext(ctx context.Context) {
-	req.ctx = ctx
-}
-
-func (req *baseRequest) SetOnProcessingFinished(callback func()) {
-	req.processingFinishedCallback = callback
-}
-
-func (req *baseRequest) OnProcessingFinished() {
-	if req.processingFinishedCallback != nil {
-		req.processingFinishedCallback()
-	}
-}
 
 // Option apply changes to baseExporter.
 type Option func(*baseExporter)
@@ -212,7 +188,7 @@ func newBaseExporter(set exporter.CreateSettings, signal component.DataType, req
 }
 
 // send sends the request using the first sender in the chain.
-func (be *baseExporter) send(req internal.Request) error {
+func (be *baseExporter) send(req *internal.Request) error {
 	return be.queueSender.send(req)
 }
 
@@ -257,7 +233,7 @@ type timeoutSender struct {
 	cfg TimeoutSettings
 }
 
-func (ts *timeoutSender) send(req internal.Request) error {
+func (ts *timeoutSender) send(req *internal.Request) error {
 	// Intentionally don't overwrite the context inside the request, because in case of retries deadline will not be
 	// updated because this deadline most likely is before the next one.
 	ctx := req.Context()

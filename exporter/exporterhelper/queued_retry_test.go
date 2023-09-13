@@ -22,18 +22,19 @@ import (
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal"
+	"go.opentelemetry.io/collector/exporter/exporterhelper/request"
 	"go.opentelemetry.io/collector/exporter/exportertest"
 	"go.opentelemetry.io/collector/internal/testdata"
 	"go.opentelemetry.io/collector/obsreport/obsreporttest"
 )
 
-func mockRequestUnmarshaler(mr *mockRequest) internal.RequestUnmarshaler {
-	return func(bytes []byte) (internal.Request, error) {
+func mockRequestUnmarshaler(mr *internal.Request) internal.RequestUnmarshaler {
+	return func(bytes []byte) (*internal.Request, error) {
 		return mr, nil
 	}
 }
 
-func mockRequestMarshaler(_ internal.Request) ([]byte, error) {
+func mockRequestMarshaler(_ *internal.Request) ([]byte, error) {
 	return nil, nil
 }
 
@@ -55,7 +56,7 @@ func TestQueuedRetry_DropOnPermanentError(t *testing.T) {
 	})
 	ocs.awaitAsyncProcessing()
 	// In the newMockConcurrentExporter we count requests and items even for failed requests
-	mockR.checkNumRequests(t, 1)
+	mockR.Request.(*mockRequest).checkNumRequests(t, 1)
 	ocs.checkSendItemsCount(t, 0)
 	ocs.checkDroppedItemsCount(t, 2)
 }
@@ -81,7 +82,7 @@ func TestQueuedRetry_DropOnNoRetry(t *testing.T) {
 	})
 	ocs.awaitAsyncProcessing()
 	// In the newMockConcurrentExporter we count requests and items even for failed requests
-	mockR.checkNumRequests(t, 1)
+	mockR.Request.(*mockRequest).checkNumRequests(t, 1)
 	ocs.checkSendItemsCount(t, 0)
 	ocs.checkDroppedItemsCount(t, 2)
 }
@@ -108,7 +109,7 @@ func TestQueuedRetry_OnError(t *testing.T) {
 	ocs.awaitAsyncProcessing()
 
 	// In the newMockConcurrentExporter we count requests and items even for failed requests
-	mockR.checkNumRequests(t, 2)
+	mockR.Request.(*mockRequest).checkNumRequests(t, 2)
 	ocs.checkSendItemsCount(t, 2)
 	ocs.checkDroppedItemsCount(t, 0)
 }
@@ -139,7 +140,7 @@ func TestQueuedRetry_StopWhileWaiting(t *testing.T) {
 
 	// TODO: Ensure that queue is drained, and uncomment the next 3 lines.
 	//  https://github.com/jaegertracing/jaeger/pull/2349
-	firstMockR.checkNumRequests(t, 1)
+	firstMockR.Request.(*mockRequest).checkNumRequests(t, 1)
 	// secondMockR.checkNumRequests(t, 1)
 	// ocs.checkSendItemsCount(t, 3)
 	ocs.checkDroppedItemsCount(t, 2)
@@ -167,7 +168,7 @@ func TestQueuedRetry_DoNotPreserveCancellation(t *testing.T) {
 	})
 	ocs.awaitAsyncProcessing()
 
-	mockR.checkNumRequests(t, 1)
+	mockR.Request.(*mockRequest).checkNumRequests(t, 1)
 	ocs.checkSendItemsCount(t, 2)
 	ocs.checkDroppedItemsCount(t, 0)
 	require.Zero(t, be.queueSender.(*queueSender).queue.Size())
@@ -206,7 +207,7 @@ func TestQueuedRetry_MaxElapsedTime(t *testing.T) {
 	assert.Less(t, waitingTime, 150*time.Millisecond)
 
 	// In the newMockConcurrentExporter we count requests and items even for failed requests.
-	mockR.checkNumRequests(t, 1)
+	mockR.Request.(*mockRequest).checkNumRequests(t, 1)
 	ocs.checkSendItemsCount(t, 2)
 	ocs.checkDroppedItemsCount(t, 7)
 	require.Zero(t, be.queueSender.(*queueSender).queue.Size())
@@ -245,7 +246,7 @@ func TestQueuedRetry_ThrottleError(t *testing.T) {
 	// The initial backoff is 10ms, but because of the throttle this should wait at least 100ms.
 	assert.True(t, 100*time.Millisecond < time.Since(start))
 
-	mockR.checkNumRequests(t, 2)
+	mockR.Request.(*mockRequest).checkNumRequests(t, 2)
 	ocs.checkSendItemsCount(t, 2)
 	ocs.checkDroppedItemsCount(t, 0)
 	require.Zero(t, be.queueSender.(*queueSender).queue.Size())
@@ -273,7 +274,7 @@ func TestQueuedRetry_RetryOnError(t *testing.T) {
 	ocs.awaitAsyncProcessing()
 
 	// In the newMockConcurrentExporter we count requests and items even for failed requests
-	mockR.checkNumRequests(t, 2)
+	mockR.Request.(*mockRequest).checkNumRequests(t, 2)
 	ocs.checkSendItemsCount(t, 2)
 	ocs.checkDroppedItemsCount(t, 0)
 	require.Zero(t, be.queueSender.(*queueSender).queue.Size())
@@ -312,7 +313,7 @@ func TestQueuedRetryHappyPath(t *testing.T) {
 	})
 
 	wantRequests := 10
-	reqs := make([]*mockRequest, 0, 10)
+	reqs := make([]*internal.Request, 0, 10)
 	for i := 0; i < wantRequests; i++ {
 		ocs.run(func() {
 			req := newMockRequest(context.Background(), 2, nil)
@@ -326,7 +327,7 @@ func TestQueuedRetryHappyPath(t *testing.T) {
 
 	require.Len(t, reqs, wantRequests)
 	for _, req := range reqs {
-		req.checkNumRequests(t, 1)
+		req.Request.(*mockRequest).checkNumRequests(t, 1)
 	}
 
 	ocs.checkSendItemsCount(t, 2*wantRequests)
@@ -404,7 +405,7 @@ func TestQueuedRetry_RequeuingEnabled(t *testing.T) {
 	ocs.awaitAsyncProcessing()
 
 	// In the newMockConcurrentExporter we count requests and items even for failed requests
-	mockR.checkNumRequests(t, 2)
+	mockR.Request.(*mockRequest).checkNumRequests(t, 2)
 	ocs.checkSendItemsCount(t, 1)
 	ocs.checkDroppedItemsCount(t, 1) // not actually dropped, but ocs counts each failed send here
 }
@@ -428,7 +429,7 @@ func TestQueuedRetry_RequeuingEnabledQueueFull(t *testing.T) {
 	mockR := newMockRequest(context.Background(), 1, traceErr)
 
 	require.Error(t, be.retrySender.send(mockR), "sending_queue is full")
-	mockR.checkNumRequests(t, 1)
+	mockR.Request.(*mockRequest).checkNumRequests(t, 1)
 }
 
 func TestQueueRetryWithDisabledQueue(t *testing.T) {
@@ -445,7 +446,7 @@ func TestQueueRetryWithDisabledQueue(t *testing.T) {
 		require.Error(t, be.send(mockR))
 	})
 	ocs.awaitAsyncProcessing()
-	mockR.checkNumRequests(t, 1)
+	mockR.Request.(*mockRequest).checkNumRequests(t, 1)
 	ocs.checkSendItemsCount(t, 0)
 	ocs.checkDroppedItemsCount(t, 2)
 	require.NoError(t, be.Shutdown(context.Background()))
@@ -464,7 +465,7 @@ func TestQueueRetryWithNoQueue(t *testing.T) {
 		require.Error(t, be.send(mockR))
 	})
 	ocs.awaitAsyncProcessing()
-	mockR.checkNumRequests(t, 1)
+	mockR.Request.(*mockRequest).checkNumRequests(t, 1)
 	ocs.checkSendItemsCount(t, 0)
 	ocs.checkDroppedItemsCount(t, 2)
 	require.NoError(t, be.Shutdown(context.Background()))
@@ -504,7 +505,8 @@ func TestQueuedRetryPersistenceEnabledStorageError(t *testing.T) {
 	qCfg.StorageID = &storageID // enable persistence
 	rCfg := NewDefaultRetrySettings()
 	set := tt.ToExporterCreateSettings()
-	be, err := newBaseExporter(set, "", false, mockRequestMarshaler, mockRequestUnmarshaler(&mockRequest{}), newObservabilityConsumerSender, WithRetry(rCfg), WithQueue(qCfg))
+	unmarshaler := mockRequestUnmarshaler(newMockRequest(context.Background(), 1, nil))
+	be, err := newBaseExporter(set, "", false, mockRequestMarshaler, unmarshaler, newObservabilityConsumerSender, WithRetry(rCfg), WithQueue(qCfg))
 	require.NoError(t, err)
 
 	var extensions = map[component.ID]component.Component{
@@ -571,30 +573,25 @@ func TestQueueRetryOptionsWithRequestExporter(t *testing.T) {
 	})
 }
 
-type mockErrorRequest struct {
-	baseRequest
-}
+type mockErrorRequest struct{}
 
 func (mer *mockErrorRequest) Export(_ context.Context) error {
 	return errors.New("transient error")
 }
 
-func (mer *mockErrorRequest) OnError(error) internal.Request {
+func (mer *mockErrorRequest) OnError(_ error) request.Request {
 	return mer
 }
 
-func (mer *mockErrorRequest) Count() int {
+func (mer *mockErrorRequest) ItemsCount() int {
 	return 7
 }
 
-func newErrorRequest(ctx context.Context) internal.Request {
-	return &mockErrorRequest{
-		baseRequest: baseRequest{ctx: ctx},
-	}
+func newErrorRequest(ctx context.Context) *internal.Request {
+	return internal.NewRequest(ctx, &mockErrorRequest{})
 }
 
 type mockRequest struct {
-	baseRequest
 	cnt          int
 	mu           sync.Mutex
 	consumeError error
@@ -614,9 +611,8 @@ func (m *mockRequest) Export(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func (m *mockRequest) OnError(error) internal.Request {
+func (m *mockRequest) OnError(_ error) request.Request {
 	return &mockRequest{
-		baseRequest:  m.baseRequest,
 		cnt:          1,
 		consumeError: nil,
 		requestCount: m.requestCount,
@@ -629,17 +625,16 @@ func (m *mockRequest) checkNumRequests(t *testing.T, want int) {
 	}, time.Second, 1*time.Millisecond)
 }
 
-func (m *mockRequest) Count() int {
+func (m *mockRequest) ItemsCount() int {
 	return m.cnt
 }
 
-func newMockRequest(ctx context.Context, cnt int, consumeError error) *mockRequest {
-	return &mockRequest{
-		baseRequest:  baseRequest{ctx: ctx},
+func newMockRequest(ctx context.Context, cnt int, consumeError error) *internal.Request {
+	return internal.NewRequest(ctx, &mockRequest{
 		cnt:          cnt,
 		consumeError: consumeError,
 		requestCount: &atomic.Int64{},
-	}
+	})
 }
 
 type observabilityConsumerSender struct {
@@ -657,7 +652,7 @@ func newObservabilityConsumerSender(_ *obsExporter) requestSender {
 	}
 }
 
-func (ocs *observabilityConsumerSender) send(req internal.Request) error {
+func (ocs *observabilityConsumerSender) send(req *internal.Request) error {
 	err := ocs.nextSender.send(req)
 	if err != nil {
 		ocs.droppedItemsCount.Add(int64(req.Count()))
@@ -743,7 +738,7 @@ type producerConsumerQueueWithCounter struct {
 	produceCounter *atomic.Uint32
 }
 
-func (pcq *producerConsumerQueueWithCounter) Produce(item internal.Request) bool {
+func (pcq *producerConsumerQueueWithCounter) Produce(item *internal.Request) bool {
 	pcq.produceCounter.Add(1)
 	return pcq.ProducerConsumerQueue.Produce(item)
 }
@@ -753,6 +748,6 @@ type errorRequestSender struct {
 	errToReturn error
 }
 
-func (rs *errorRequestSender) send(_ internal.Request) error {
+func (rs *errorRequestSender) send(_ *internal.Request) error {
 	return rs.errToReturn
 }

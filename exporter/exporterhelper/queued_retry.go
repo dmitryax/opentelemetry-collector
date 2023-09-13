@@ -88,7 +88,7 @@ func newQueueSender(id component.ID, signal component.DataType, queue internal.P
 	}
 }
 
-func (qs *queueSender) onTemporaryFailure(logger *zap.Logger, req internal.Request, err error) error {
+func (qs *queueSender) onTemporaryFailure(logger *zap.Logger, req *internal.Request, err error) error {
 	if !qs.requeuingEnabled || qs.queue == nil {
 		logger.Error(
 			"Exporting failed. No more retries left. Dropping data.",
@@ -122,7 +122,7 @@ func (qs *queueSender) start(ctx context.Context, host component.Host, set expor
 	err := qs.queue.Start(ctx, host, internal.QueueSettings{
 		CreateSettings: set,
 		DataType:       qs.signal,
-		Callback: func(item internal.Request) {
+		Callback: func(item *internal.Request) {
 			_ = qs.nextSender.send(item)
 			item.OnProcessingFinished()
 		},
@@ -195,7 +195,7 @@ func NewDefaultRetrySettings() RetrySettings {
 }
 
 // send implements the requestSender interface
-func (qs *queueSender) send(req internal.Request) error {
+func (qs *queueSender) send(req *internal.Request) error {
 	if qs.queue == nil {
 		err := qs.nextSender.send(req)
 		if err != nil {
@@ -247,7 +247,7 @@ func NewThrottleRetry(err error, delay time.Duration) error {
 	}
 }
 
-type onRequestHandlingFinishedFunc func(*zap.Logger, internal.Request, error) error
+type onRequestHandlingFinishedFunc func(*zap.Logger, *internal.Request, error) error
 
 type retrySender struct {
 	baseRequestSender
@@ -260,7 +260,7 @@ type retrySender struct {
 
 func newRetrySender(id component.ID, rCfg RetrySettings, logger *zap.Logger, onTemporaryFailure onRequestHandlingFinishedFunc) *retrySender {
 	if onTemporaryFailure == nil {
-		onTemporaryFailure = func(logger *zap.Logger, req internal.Request, err error) error {
+		onTemporaryFailure = func(logger *zap.Logger, req *internal.Request, err error) error {
 			return err
 		}
 	}
@@ -278,7 +278,7 @@ func (rs *retrySender) shutdown() {
 }
 
 // send implements the requestSender interface
-func (rs *retrySender) send(req internal.Request) error {
+func (rs *retrySender) send(req *internal.Request) error {
 	if !rs.cfg.Enabled {
 		err := rs.nextSender.send(req)
 		if err != nil {

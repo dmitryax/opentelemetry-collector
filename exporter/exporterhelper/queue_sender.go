@@ -34,7 +34,9 @@ var (
 type QueueSettings struct {
 	// Enabled indicates whether to not enqueue batches before sending to the consumerSender.
 	Enabled bool `mapstructure:"enabled"`
-	// NumConsumers is the number of consumers from the queue.
+	// NumConsumers is the number of consumers from the queue. Defaults to 10.
+	// If batching is enabled, a combined batch cannot contain more requests than the number of consumers.
+	// So it's recommended to set higher number of consumers if batching is enabled.
 	NumConsumers int `mapstructure:"num_consumers"`
 	// QueueSize is the maximum number of batches allowed in queue at a given time.
 	QueueSize int `mapstructure:"queue_size"`
@@ -80,6 +82,7 @@ type queueSender struct {
 	logger         *zap.Logger
 	meter          otelmetric.Meter
 	consumers      *internal.QueueConsumers[Request]
+	consumersNum   int
 
 	metricCapacity otelmetric.Int64ObservableGauge
 	metricSize     otelmetric.Int64ObservableGauge
@@ -89,6 +92,7 @@ func newQueueSender(queue Queue, set exporter.CreateSettings, numConsumers int) 
 	qs := &queueSender{
 		fullName:       set.ID.String(),
 		queue:          queue,
+		consumersNum:   numConsumers,
 		traceAttribute: attribute.String(obsmetrics.ExporterKey, set.ID.String()),
 		logger:         set.TelemetrySettings.Logger,
 		meter:          set.TelemetrySettings.MeterProvider.Meter(scopeName),

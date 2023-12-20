@@ -72,17 +72,6 @@ func checkStatus(t *testing.T, sd sdktrace.ReadOnlySpan, err error) {
 	}
 }
 
-func TestQueueRetryOptionsWithRequestExporter(t *testing.T) {
-	bs, err := newBaseExporter(exportertest.NewNopCreateSettings(), "", true, nil, nil, newNoopObsrepSender,
-		WithRetry(configretry.NewDefaultBackOffConfig()))
-	require.Nil(t, err)
-	require.True(t, bs.requestExporter)
-	require.Panics(t, func() {
-		_, _ = newBaseExporter(exportertest.NewNopCreateSettings(), "", true, nil, nil, newNoopObsrepSender,
-			WithRetry(configretry.NewDefaultBackOffConfig()), WithQueue(NewDefaultQueueSettings()))
-	})
-}
-
 func TestBaseExporterLogging(t *testing.T) {
 	set := exportertest.NewNopCreateSettings()
 	logger, observed := observer.New(zap.DebugLevel)

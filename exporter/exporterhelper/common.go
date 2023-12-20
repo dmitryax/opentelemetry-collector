@@ -154,6 +154,12 @@ func WithCapabilities(capabilities consumer.Capabilities) Option {
 	}
 }
 
+func WithBatcher(cfg MergeBatcherConfig, mf BatchMergeFunc, opts ...BatcherOption) Option {
+	return func(o *baseExporter) {
+		o.batchSender = newBatchSender(cfg, o.set, mf, opts...)
+	}
+}
+
 // baseExporter contains common fields between different exporter types.
 type baseExporter struct {
 	component.StartFunc
@@ -170,6 +176,7 @@ type baseExporter struct {
 	// Chain of senders that the exporter helper applies before passing the data to the actual exporter.
 	// The data is handled by each sender in the respective order starting from the queueSender.
 	// Most of the senders are optional, and initialized with a no-op path-through sender.
+	batchSender   requestSender
 	queueSender   requestSender
 	obsrepSender  requestSender
 	retrySender   requestSender
@@ -193,6 +200,7 @@ func newBaseExporter(set exporter.CreateSettings, signal component.DataType, req
 		unmarshaler:     unmarshaler,
 		signal:          signal,
 
+		batchSender:   &baseRequestSender{},
 		queueSender:   &baseRequestSender{},
 		obsrepSender:  osf(obsReport),
 		retrySender:   &baseRequestSender{},
@@ -207,6 +215,13 @@ func newBaseExporter(set exporter.CreateSettings, signal component.DataType, req
 	}
 	be.connectSenders()
 
+	// If queue sender is enabled assign to the batch sender the same number of workers.
+	if qs, ok := be.queueSender.(*queueSender); ok {
+		if bs, ok := be.batchSender.(*batchSender); ok {
+			bs.concurrencyLimit = uint64(qs.consumersNum)
+		}
+	}
+
 	return be, nil
 }
 
@@ -217,7 +232,8 @@ func (be *baseExporter) send(ctx context.Context, req Request) error {
 
 // connectSenders connects the senders in the predefined order.
 func (be *baseExporter) connectSenders() {
-	be.queueSender.setNextSender(be.obsrepSender)
+	be.queueSender.setNextSender(be.batchSender)
+	be.batchSender.setNextSender(be.obsrepSender)
 	be.obsrepSender.setNextSender(be.retrySender)
 	be.retrySender.setNextSender(be.timeoutSender)
 }
@@ -228,7 +244,12 @@ func (be *baseExporter) Start(ctx context.Context, host component.Host) error {
 		return err
 	}
 
-	// If no error then start the queueSender.
+	// If no error then start the batchSender.
+	if err := be.batchSender.Start(ctx, host); err != nil {
+		return err
+	}
+
+	// Last start the queueSender.
 	return be.queueSender.Start(ctx, host)
 }
 
@@ -236,6 +257,8 @@ func (be *baseExporter) Shutdown(ctx context.Context) error {
 	return multierr.Combine(
 		// First shutdown the retry sender, so the queue sender can flush the queue without retries.
 		be.retrySender.Shutdown(ctx),
+		// Then shutdown the batch sender
+		be.batchSender.Shutdown(ctx),
 		// Then shutdown the queue sender.
 		be.queueSender.Shutdown(ctx),
 		// Last shutdown the wrapped exporter itself.

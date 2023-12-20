@@ -96,41 +96,61 @@ func TestQueuedRetry_DropOnFull(t *testing.T) {
 }
 
 func TestQueuedRetryHappyPath(t *testing.T) {
-	tt, err := obsreporttest.SetupTelemetry(defaultID)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
+	tests := []struct {
+		name        string
+		queueOption Option
+	}{
+		{
+			name:        "WithQueue",
+			queueOption: WithQueue(NewDefaultQueueSettings()),
+		},
+		{
+			name:        "WithRequestQueue/MemoryQueueFactory",
+			queueOption: WithRequestQueue(NewDefaultQueueConfig(), NewMemoryQueueFactory()),
+		},
+		{
+			name:        "WithRequestQueue/PersistentQueueFactory",
+			queueOption: WithRequestQueue(NewDefaultQueueConfig(), NewPersistentQueueFactory(nil, nil, nil)),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tel, err := obsreporttest.SetupTelemetry(defaultID)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, tel.Shutdown(context.Background())) })
 
-	qCfg := NewDefaultQueueSettings()
-	rCfg := configretry.NewDefaultBackOffConfig()
-	set := exporter.CreateSettings{ID: defaultID, TelemetrySettings: tt.TelemetrySettings, BuildInfo: component.NewDefaultBuildInfo()}
-	be, err := newBaseExporter(set, "", false, nil, nil, newObservabilityConsumerSender, WithRetry(rCfg), WithQueue(qCfg))
-	require.NoError(t, err)
-	ocs := be.obsrepSender.(*observabilityConsumerSender)
-	require.NoError(t, be.Start(context.Background(), componenttest.NewNopHost()))
-	t.Cleanup(func() {
-		assert.NoError(t, be.Shutdown(context.Background()))
-	})
+			rCfg := configretry.NewDefaultBackOffConfig()
+			set := exporter.CreateSettings{ID: defaultID, TelemetrySettings: tel.TelemetrySettings, BuildInfo: component.NewDefaultBuildInfo()}
+			be, err := newBaseExporter(set, "", false, nil, nil, newObservabilityConsumerSender, WithRetry(rCfg), tt.queueOption)
+			require.NoError(t, err)
+			ocs := be.obsrepSender.(*observabilityConsumerSender)
+			require.NoError(t, be.Start(context.Background(), componenttest.NewNopHost()))
+			t.Cleanup(func() {
+				assert.NoError(t, be.Shutdown(context.Background()))
+			})
 
-	wantRequests := 10
-	reqs := make([]*mockRequest, 0, 10)
-	for i := 0; i < wantRequests; i++ {
-		ocs.run(func() {
-			req := newMockRequest(2, nil)
-			reqs = append(reqs, req)
-			require.NoError(t, be.send(context.Background(), req))
+			wantRequests := 10
+			reqs := make([]*mockRequest, 0, 10)
+			for i := 0; i < wantRequests; i++ {
+				ocs.run(func() {
+					req := newMockRequest(2, nil)
+					reqs = append(reqs, req)
+					require.NoError(t, be.send(context.Background(), req))
+				})
+			}
+
+			// Wait until all batches received
+			ocs.awaitAsyncProcessing()
+
+			require.Len(t, reqs, wantRequests)
+			for _, req := range reqs {
+				req.checkNumRequests(t, 1)
+			}
+
+			ocs.checkSendItemsCount(t, 2*wantRequests)
+			ocs.checkDroppedItemsCount(t, 0)
 		})
 	}
-
-	// Wait until all batches received
-	ocs.awaitAsyncProcessing()
-
-	require.Len(t, reqs, wantRequests)
-	for _, req := range reqs {
-		req.checkNumRequests(t, 1)
-	}
-
-	ocs.checkSendItemsCount(t, 2*wantRequests)
-	ocs.checkDroppedItemsCount(t, 0)
 }
 
 // Force the state of feature gate for a test
@@ -222,22 +242,47 @@ func TestQueueSettings_Validate(t *testing.T) {
 }
 
 func TestQueueRetryWithDisabledQueue(t *testing.T) {
-	qs := NewDefaultQueueSettings()
-	qs.Enabled = false
-	be, err := newBaseExporter(exportertest.NewNopCreateSettings(), component.DataTypeLogs, false, nil, nil, newObservabilityConsumerSender, WithQueue(qs))
-	require.IsType(t, &errorLoggingRequestSender{}, be.queueSender)
-	require.NoError(t, err)
-	require.NoError(t, be.Start(context.Background(), componenttest.NewNopHost()))
-	ocs := be.obsrepSender.(*observabilityConsumerSender)
-	mockR := newMockRequest(2, errors.New("some error"))
-	ocs.run(func() {
-		require.Error(t, be.send(context.Background(), mockR))
-	})
-	ocs.awaitAsyncProcessing()
-	mockR.checkNumRequests(t, 1)
-	ocs.checkSendItemsCount(t, 0)
-	ocs.checkDroppedItemsCount(t, 2)
-	require.NoError(t, be.Shutdown(context.Background()))
+	tests := []struct {
+		name        string
+		queueOption Option
+	}{
+		{
+			name: "WithQueue",
+			queueOption: func() Option {
+				qs := NewDefaultQueueSettings()
+				qs.Enabled = false
+				return WithQueue(qs)
+			}(),
+		},
+		{
+			name: "WithRequestQueue",
+			queueOption: func() Option {
+				qs := NewDefaultQueueConfig()
+				qs.Enabled = false
+				return WithRequestQueue(qs, NewMemoryQueueFactory())
+			}(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			be, err := newBaseExporter(defaultSettings, "", false, nil, nil, newObservabilityConsumerSender, tt.queueOption)
+			require.IsType(t, &errorLoggingRequestSender{}, be.queueSender)
+			require.NoError(t, err)
+			require.NoError(t, be.Start(context.Background(), componenttest.NewNopHost()))
+			ocs := be.obsrepSender.(*observabilityConsumerSender)
+			mockR := newMockRequest(2, errors.New("some error"))
+			ocs.run(func() {
+				require.Error(t, be.send(context.Background(), mockR))
+			})
+			ocs.awaitAsyncProcessing()
+			mockR.checkNumRequests(t, 1)
+			ocs.checkSendItemsCount(t, 0)
+			ocs.checkDroppedItemsCount(t, 2)
+			require.NoError(t, be.Shutdown(context.Background()))
+		})
+	}
+
 }
 
 func TestQueuedRetryPersistenceEnabled(t *testing.T) {
@@ -331,7 +376,8 @@ func TestQueuedRetryPersistentEnabled_NoDataLossOnShutdown(t *testing.T) {
 }
 
 func TestQueueSenderNoStartShutdown(t *testing.T) {
-	qs := newQueueSender(NewDefaultQueueSettings(), exportertest.NewNopCreateSettings(), "", nil, nil)
+	queue := internal.NewBoundedMemoryQueue[Request](internal.NewRequestsCapacityLimiter[Request](1))
+	qs := newQueueSender(queue, exportertest.NewNopCreateSettings(), 1)
 	assert.NoError(t, qs.Shutdown(context.Background()))
 }
 

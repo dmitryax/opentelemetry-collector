@@ -16,16 +16,16 @@ func TestRequestsCapacityLimiter(t *testing.T) {
 
 	req := fakeReq{itemsCount: 5}
 
-	assert.True(t, rl.claim(req))
+	assert.True(t, rl.Claim(req))
 	assert.Equal(t, 1, rl.Size())
 
-	assert.True(t, rl.claim(req))
+	assert.True(t, rl.Claim(req))
 	assert.Equal(t, 2, rl.Size())
 
-	assert.False(t, rl.claim(req))
+	assert.False(t, rl.Claim(req))
 	assert.Equal(t, 2, rl.Size())
 
-	rl.release(req)
+	rl.Release(req)
 	assert.Equal(t, 1, rl.Size())
 }
 
@@ -36,16 +36,16 @@ func TestItemsCapacityLimiter(t *testing.T) {
 
 	req := fakeReq{itemsCount: 3}
 
-	assert.True(t, rl.claim(req))
+	assert.True(t, rl.Claim(req))
 	assert.Equal(t, 3, rl.Size())
 
-	assert.True(t, rl.claim(req))
+	assert.True(t, rl.Claim(req))
 	assert.Equal(t, 6, rl.Size())
 
-	assert.False(t, rl.claim(req))
+	assert.False(t, rl.Claim(req))
 	assert.Equal(t, 6, rl.Size())
 
-	rl.release(req)
+	rl.Release(req)
 	assert.Equal(t, 3, rl.Size())
 }
 

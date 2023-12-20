@@ -85,17 +85,7 @@ type queueSender struct {
 	metricSize     otelmetric.Int64ObservableGauge
 }
 
-func newQueueSender(config QueueSettings, set exporter.CreateSettings, signal component.DataType,
-	marshaler RequestMarshaler, unmarshaler RequestUnmarshaler) *queueSender {
-
-	isPersistent := config.StorageID != nil
-	var queue internal.Queue[Request]
-	capLimiter := internal.NewRequestsCapacityLimiter[Request](config.QueueSize)
-	if isPersistent {
-		queue = internal.NewPersistentQueue[Request](capLimiter, signal, *config.StorageID, marshaler, unmarshaler, set)
-	} else {
-		queue = internal.NewBoundedMemoryQueue[Request](capLimiter)
-	}
+func newQueueSender(queue Queue, set exporter.CreateSettings, numConsumers int) *queueSender {
 	qs := &queueSender{
 		fullName:       set.ID.String(),
 		queue:          queue,
@@ -103,7 +93,7 @@ func newQueueSender(config QueueSettings, set exporter.CreateSettings, signal co
 		logger:         set.TelemetrySettings.Logger,
 		meter:          set.TelemetrySettings.MeterProvider.Meter(scopeName),
 	}
-	qs.consumers = internal.NewQueueConsumers(queue, config.NumConsumers, qs.consume)
+	qs.consumers = internal.NewQueueConsumers(queue, numConsumers, qs.consume)
 	return qs
 }
 

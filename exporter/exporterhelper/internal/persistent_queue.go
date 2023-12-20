@@ -246,7 +246,7 @@ func (pq *persistentQueue[T]) Offer(ctx context.Context, req T) error {
 
 // putInternal is the internal version that requires caller to hold the mutex lock.
 func (pq *persistentQueue[T]) putInternal(ctx context.Context, req T) error {
-	if !pq.QueueCapacityLimiter.claim(req) {
+	if !pq.QueueCapacityLimiter.Claim(req) {
 		pq.set.Logger.Warn("Maximum queue capacity reached")
 		return ErrQueueIsFull
 	}
@@ -265,7 +265,7 @@ func (pq *persistentQueue[T]) putInternal(ctx context.Context, req T) error {
 		storage.SetOperation(itemKey, reqBuf),
 	}
 	if storageErr := pq.client.Batch(ctx, ops...); storageErr != nil {
-		pq.QueueCapacityLimiter.release(req)
+		pq.QueueCapacityLimiter.Release(req)
 		return storageErr
 	}
 
@@ -370,7 +370,7 @@ func (pq *persistentQueue[T]) releaseCapacity(req T) {
 			pq.initQueueSize.Store(0)
 			return
 		}
-		reqSize := pq.QueueCapacityLimiter.sizeOf(req)
+		reqSize := pq.QueueCapacityLimiter.SizeOf(req)
 		if pq.initQueueSize.Load() < reqSize {
 			pq.initQueueSize.Store(0)
 			return
@@ -380,7 +380,7 @@ func (pq *persistentQueue[T]) releaseCapacity(req T) {
 	}
 
 	// Otherwise, decrease the current queue size.
-	pq.QueueCapacityLimiter.release(req)
+	pq.QueueCapacityLimiter.Release(req)
 }
 
 // retrieveAndEnqueueNotDispatchedReqs gets the items for which sending was not finished, cleans the storage

@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/collector/config/configretry"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/exporter"
+	"go.opentelemetry.io/collector/exporter/exporterhelper/internal"
 )
 
 // requestSender is an abstraction of a sender for a request independent of the type of the data (traces, metrics, logs).
@@ -102,7 +103,7 @@ func WithRetry(config configretry.BackOffConfig) Option {
 func WithQueue(config QueueSettings) Option {
 	return func(o *baseExporter) {
 		if o.requestExporter {
-			panic("queueing is not available for the new request exporters yet")
+			panic("WithQueue option is not available for the new request exporters, use WithRequestQueue instead")
 		}
 		if !config.Enabled {
 			o.queueSender = &errorLoggingRequestSender{
@@ -111,7 +112,36 @@ func WithQueue(config QueueSettings) Option {
 			}
 			return
 		}
-		o.queueSender = newQueueSender(config, o.set, o.signal, o.marshaler, o.unmarshaler)
+		capLimiter := internal.NewRequestsCapacityLimiter[Request](config.QueueSize)
+		var queue internal.Queue[Request]
+		if config.StorageID != nil {
+			queue = internal.NewPersistentQueue[Request](capLimiter, o.signal, *config.StorageID, o.marshaler, o.unmarshaler, o.set)
+		} else {
+			queue = internal.NewBoundedMemoryQueue[Request](capLimiter)
+		}
+		o.queueSender = newQueueSender(queue, o.set, config.NumConsumers)
+	}
+}
+
+// WithRequestQueue enables queueing for an exporter.
+// This option should be used with the new exporter helpers New[Traces|Metrics|Logs]RequestExporter.
+// This API is at the early stage of development and may change without backward compatibility
+// until https://github.com/open-telemetry/opentelemetry-collector/issues/8122 is resolved.
+func WithRequestQueue(cfg QueueConfig, queueFactory QueueFactory) Option {
+	return func(o *baseExporter) {
+		if !cfg.Enabled {
+			o.queueSender = &errorLoggingRequestSender{
+				logger:  o.set.Logger,
+				message: "Exporting failed. Dropping data. Try enabling sending_queue to survive temporary failures.",
+			}
+			return
+		}
+		queue := queueFactory(QueueCreateSettings{
+			CreateSettings:  o.set,
+			CapacityLimiter: internal.NewItemsCapacityLimiter[Request](cfg.QueueItemsSize),
+			DataType:        o.signal,
+		})
+		o.queueSender = newQueueSender(queue, o.set, cfg.NumConsumers)
 	}
 }
 

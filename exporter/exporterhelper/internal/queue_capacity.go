@@ -17,12 +17,12 @@ type QueueCapacityLimiter[T any] interface {
 	Capacity() int
 	// Size returns the current size of the queue.
 	Size() int
-	// claim tries to claim capacity for the given element. If the capacity is not available, it returns false.
-	claim(T) bool
-	// release releases capacity for the given queue element.
-	release(T)
-	// sizeOf returns the size of the given element.
-	sizeOf(T) uint64
+	// Claim tries to claim capacity for the given element. If the capacity is not available, it returns false.
+	Claim(T) bool
+	// Release releases capacity for the given queue element.
+	Release(T)
+	// SizeOf returns the size of the given element.
+	SizeOf(T) uint64
 }
 
 type baseCapacityLimiter[T any] struct {
@@ -69,17 +69,17 @@ func NewItemsCapacityLimiter[T itemsCounter](capacity int) QueueCapacityLimiter[
 }
 
 // nolint:unused
-func (icl *itemsCapacityLimiter[T]) claim(el T) bool {
+func (icl *itemsCapacityLimiter[T]) Claim(el T) bool {
 	return icl.baseCapacityLimiter.claim(uint64(el.ItemsCount()))
 }
 
 // nolint:unused
-func (icl *itemsCapacityLimiter[T]) release(el T) {
+func (icl *itemsCapacityLimiter[T]) Release(el T) {
 	icl.baseCapacityLimiter.release(uint64(el.ItemsCount()))
 }
 
 // nolint:unused
-func (icl *itemsCapacityLimiter[T]) sizeOf(el T) uint64 {
+func (icl *itemsCapacityLimiter[T]) SizeOf(el T) uint64 {
 	return uint64(el.ItemsCount())
 }
 
@@ -95,17 +95,17 @@ func NewRequestsCapacityLimiter[T any](capacity int) QueueCapacityLimiter[T] {
 }
 
 // nolint:unused
-func (rcl *requestsCapacityLimiter[T]) claim(_ T) bool {
+func (rcl *requestsCapacityLimiter[T]) Claim(_ T) bool {
 	return rcl.baseCapacityLimiter.claim(1)
 }
 
 // nolint:unused
-func (rcl *requestsCapacityLimiter[T]) release(_ T) {
+func (rcl *requestsCapacityLimiter[T]) Release(_ T) {
 	rcl.baseCapacityLimiter.release(1)
 }
 
 // nolint:unused
-func (rcl *requestsCapacityLimiter[T]) sizeOf(_ T) uint64 {
+func (rcl *requestsCapacityLimiter[T]) SizeOf(_ T) uint64 {
 	return 1
 }
 

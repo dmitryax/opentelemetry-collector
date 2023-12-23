@@ -13,6 +13,8 @@ import (
 	"go.opentelemetry.io/collector/config/configretry"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/exporter"
+	"go.opentelemetry.io/collector/exporter/exporterqueue"
+	"go.opentelemetry.io/collector/exporter/internal"
 )
 
 // requestSender is an abstraction of a sender for a request independent of the type of the data (traces, metrics, logs).
@@ -85,17 +87,48 @@ func WithRetry(config configretry.BackOffConfig) Option {
 func WithQueue(config QueueSettings) Option {
 	return func(o *baseExporter) {
 		if o.requestExporter {
-			panic("queueing is not available for the new request exporters yet")
+			panic("WithQueue option is not available for the new request exporters, use WithRequestQueue instead")
 		}
 		if !config.Enabled {
 			o.exportFailureMessage += " Try enabling sending_queue to survive temporary failures."
 			return
 		}
-		consumeErrHandler := func(err error, req Request) {
-			o.set.Logger.Error("Exporting failed. Dropping data."+o.exportFailureMessage,
-				zap.Error(err), zap.Int("dropped_items", req.ItemsCount()))
+		qf := exporterqueue.NewPersistentQueueFactory[Request](config.StorageID, exporterqueue.PersistentQueueSettings[Request]{
+			Marshaler:   o.marshaler,
+			Unmarshaler: o.unmarshaler,
+		})
+		queue := qf(exporterqueue.Settings[Request]{
+			Sizer:            &internal.RequestSizer[Request]{},
+			Capacity:         config.QueueSize,
+			DataType:         o.signal,
+			ExporterSettings: o.set,
+		})
+		o.queueSender = newQueueSender(queue, o.set, config.NumConsumers, o.exportFailureMessage)
+	}
+}
+
+// WithRequestQueue enables queueing for an exporter.
+// This option should be used with the new exporter helpers New[Traces|Metrics|Logs]RequestExporter.
+// This API is at the early stage of development and may change without backward compatibility
+// until https://github.com/open-telemetry/opentelemetry-collector/issues/8122 is resolved.
+func WithRequestQueue(cfg exporterqueue.Config, queueFactory exporterqueue.Factory[Request]) Option {
+	return func(o *baseExporter) {
+		if !cfg.Enabled {
+			o.exportFailureMessage += " Try enabling sending_queue to survive temporary failures."
+			return
 		}
-		o.queueSender = newQueueSender(config, o.set, o.signal, o.marshaler, o.unmarshaler, consumeErrHandler)
+		set := exporterqueue.Settings[Request]{
+			DataType:         o.signal,
+			ExporterSettings: o.set,
+		}
+		if cfg.QueueSizeItems > 0 {
+			set.Sizer = &internal.ItemsSizer[Request]{}
+			set.Capacity = cfg.QueueSizeItems
+		} else {
+			set.Sizer = &internal.RequestSizer[Request]{}
+			set.Capacity = cfg.QueueSize
+		}
+		o.queueSender = newQueueSender(queueFactory(set), o.set, cfg.NumConsumers, o.exportFailureMessage)
 	}
 }
 

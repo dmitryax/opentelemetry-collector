@@ -3,7 +3,7 @@
 // Copyright (c) 2017 Uber Technologies, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-package internal // import "go.opentelemetry.io/collector/exporter/exporterhelper/internal"
+package internal // import "go.opentelemetry.io/collector/exporter/internal"
 
 import (
 	"context"
